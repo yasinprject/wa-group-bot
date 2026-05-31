@@ -1,0 +1,14 @@
+{
+  "name": "wa-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Group Welcome Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.23.0",
+    "puppeteer": "^21.0.0"
+  }
+}
