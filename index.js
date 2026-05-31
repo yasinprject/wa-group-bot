@@ -1,7 +1,7 @@
 const { default: makeWASocket, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const express = require('express');
 const pino = require('pino');
-const qrcode = require('qrcode-terminal'); // QR কোড দেখানোর লাইব্রেরি
+const qrcode = require('qrcode-terminal');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -13,16 +13,15 @@ async function connectToWhatsApp () {
 
     const sock = makeWASocket({
         auth: state,
-        logger: pino({ level: 'silent' }) // হাবিজাবি লগ বন্ধ
+        logger: pino({ level: 'silent' }),
+        browser: ['WA Bot', 'Chrome', '1.0.0'] // এই লাইনটি কানেকশন বিচ্ছিন্ন হওয়া বন্ধ করবে
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // কানেকশন আপডেট ও QR কোড ধরার সিস্টেম
     sock.ev.on('connection.update', (update) => {
         const { connection, qr } = update;
         
-        // যদি সার্ভার থেকে QR কোড আসে, তবে সেটি টার্মিনালে দেখাবে
         if (qr) {
             console.log('\n✅ নিচের QR কোডটি আপনার হোয়াটসঅ্যাপ দিয়ে স্ক্যান করুন:\n');
             qrcode.generate(qr, { small: true });
@@ -30,7 +29,8 @@ async function connectToWhatsApp () {
 
         if(connection === 'close') {
             console.log('কানেকশন বিচ্ছিন্ন হয়েছে, আবার যুক্ত হচ্ছে...');
-            connectToWhatsApp();
+            // ৩ সেকেন্ড পর আবার ট্রাই করবে যাতে সার্ভার হ্যাং না হয়
+            setTimeout(connectToWhatsApp, 3000); 
         } else if(connection === 'open') {
             console.log('\n🎉 আলহামদুলিল্লাহ! আপনার বট এখন সম্পূর্ণ প্রস্তুত এবং রানিং!\n');
         }
