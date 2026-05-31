@@ -4,13 +4,11 @@
   "description": "WhatsApp Group Welcome Bot",
   "main": "index.js",
   "scripts": {
-    "postinstall": "npx puppeteer browsers install chrome",
     "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.18.2",
     "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main",
-    "puppeteer": "latest"
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main"
   }
 }
