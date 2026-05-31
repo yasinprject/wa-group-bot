@@ -1,39 +1,41 @@
 // 👇 আপনার বটের নম্বরটি এখানে দিন (880 সহ, কোনো + বা স্পেস দেবেন না)
-// যেমন: "8801712345678"
-const botNumber = "8801302108957"; 
+const botNumber = "88011302108957"; 
 
-const { default: makeWASocket, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const pino = require('pino');
 
 const app = express();
-const port = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('আলহামদুলিল্লাহ, আপনার হোয়াটসঅ্যাপ বট সচল আছে!'));
-app.listen(port, () => console.log(`ওয়েব সার্ভার ${port} পোর্টে চলছে...`));
+app.listen(process.env.PORT || 3000, () => console.log(`সার্ভার চলছে...`));
 
 async function connectToWhatsApp () {
-    // 🔴 ম্যাজিক ট্রিক: ফোল্ডারের নাম পরিবর্তন করে 'fresh_session_1' দেওয়া হলো
-    // এতে আগের সব জ্যাম হওয়া ক্যাশ ইগনোর করে একদম ফ্রেশভাবে শুরু হবে!
-    const { state, saveCreds } = await useMultiFileAuthState('fresh_session_1');
+    // আগের সব ক্যাশ ফেলে দিয়ে একদম নতুন সেশন
+    const { state, saveCreds } = await useMultiFileAuthState('session_mac_desktop');
 
     const sock = makeWASocket({
         auth: state,
         logger: pino({ level: 'silent' }),
-        browser: ['WA Bot', 'Chrome', '1.0.0'], 
-        printQRInTerminal: false
+        // 🔴 ম্যাজিক ট্রিক ১: ম্যাক ডেস্কটপের ছদ্মবেশ (যাতে সন্দেহ না করে)
+        browser: Browsers.macOS('Desktop'),
+        printQRInTerminal: false,
+        // 🔴 ম্যাজিক ট্রিক ২: সিপিইউ লোড কমানো এবং কানেকশন ধরে রাখা
+        syncFullHistory: false, 
+        markOnlineOnConnect: false,
+        keepAliveIntervalMs: 30000 
     });
 
     if (!sock.authState.creds.registered) {
+        // সার্ভার পুরোপুরি চালু হওয়ার জন্য একটু সময় দেওয়া হলো
         setTimeout(async () => {
             try {
                 let code = await sock.requestPairingCode(botNumber);
-                // কোডটি সুন্দর করে দেখানোর জন্য মাঝে হাইফেন (-) দেওয়া হলো
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log('\n=============================================');
-                console.log(`✅ আপনার পেয়ারিং কোড (Pairing Code): ${code}`);
+                console.log(`✅ আপনার পেয়ারিং কোড: ${code}`);
                 console.log('=============================================\n');
             } catch (error) {
-                console.log('কোড তৈরিতে সমস্যা:', error.message);
+                console.log('কোড তৈরিতে সমস্যা:', error?.message);
             }
         }, 4000); 
     }
@@ -45,8 +47,8 @@ async function connectToWhatsApp () {
         
         if(connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
-            console.log(`কানেকশন বিচ্ছিন্ন হয়েছে (Reason: ${reason}). আবার যুক্ত হচ্ছে...`);
-            // 401 মানে লগআউট, লগআউট হলে আর লুপ করবে না
+            console.log(`কানেকশন বিচ্ছিন্ন (Code: ${reason}). আবার যুক্ত হচ্ছে...`);
+            // লগআউট না হলে আবার ট্রাই করবে
             if(reason !== 401) {
                 setTimeout(connectToWhatsApp, 5000);
             }
