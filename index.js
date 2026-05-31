@@ -1,7 +1,6 @@
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const puppeteer = require('puppeteer'); // নতুন যুক্ত করা হলো
 
 // Render-এর জন্য ডামি সার্ভার
 const app = express();
@@ -15,11 +14,10 @@ app.listen(port, () => {
     console.log(`ওয়েব সার্ভার ${port} পোর্টে চলছে...`);
 });
 
-// বটের মূল কোড
+// বটের মূল কোড (এখানে সমস্যার লাইনগুলো রিমুভ করা হয়েছে)
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-        executablePath: puppeteer.executablePath(), // ১০০% কাজ করার জন্য এই লাইনটি যুক্ত করা হলো
         headless: true,
         args: [
             '--no-sandbox',
