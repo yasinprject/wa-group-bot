@@ -1,4 +1,5 @@
-// 👇 আপনার বটের নম্বরটি এখানে দিন (880 সহ)
+// 👇 আপনার বটের নম্বরটি এখানে দিন (880 সহ, কোনো + বা স্পেস দেবেন না)
+// যেমন: "8801712345678"
 const botNumber = "8801302108957"; 
 
 const { default: makeWASocket, useMultiFileAuthState } = require('@whiskeysockets/baileys');
@@ -10,44 +11,45 @@ const port = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('আলহামদুলিল্লাহ, আপনার হোয়াটসঅ্যাপ বট সচল আছে!'));
 app.listen(port, () => console.log(`ওয়েব সার্ভার ${port} পোর্টে চলছে...`));
 
-let pairingCodeRequested = false; // এটি কোড বারবার আসা বন্ধ করবে
-
 async function connectToWhatsApp () {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    // 🔴 ম্যাজিক ট্রিক: ফোল্ডারের নাম পরিবর্তন করে 'fresh_session_1' দেওয়া হলো
+    // এতে আগের সব জ্যাম হওয়া ক্যাশ ইগনোর করে একদম ফ্রেশভাবে শুরু হবে!
+    const { state, saveCreds } = await useMultiFileAuthState('fresh_session_1');
 
     const sock = makeWASocket({
         auth: state,
         logger: pino({ level: 'silent' }),
-        browser: ['Ubuntu', 'Chrome', '20.0.04'],
+        browser: ['WA Bot', 'Chrome', '1.0.0'], 
         printQRInTerminal: false
     });
 
-    // মাত্র একবার কোড জেনারেট করবে
-    if (!sock.authState.creds.registered && !pairingCodeRequested) {
-        pairingCodeRequested = true;
-        
-        // সার্ভার রান হওয়ার ৫ সেকেন্ড পর কোড দেবে, যাতে আপনি রেডি হতে পারেন
+    if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
-                const code = await sock.requestPairingCode(botNumber);
+                let code = await sock.requestPairingCode(botNumber);
+                // কোডটি সুন্দর করে দেখানোর জন্য মাঝে হাইফেন (-) দেওয়া হলো
+                code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log('\n=============================================');
-                console.log(`✅ আপনার পেয়ারিং কোড: ${code}`);
+                console.log(`✅ আপনার পেয়ারিং কোড (Pairing Code): ${code}`);
                 console.log('=============================================\n');
             } catch (error) {
                 console.log('কোড তৈরিতে সমস্যা:', error.message);
-                pairingCodeRequested = false; // ফেইল হলে আবার ট্রাই করার সু্যোগ
             }
-        }, 5000); 
+        }, 4000); 
     }
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
-        const { connection } = update;
+        const { connection, lastDisconnect } = update;
         
         if(connection === 'close') {
-            console.log('কানেকশন রিস্টার্ট হচ্ছে...');
-            setTimeout(connectToWhatsApp, 5000); 
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            console.log(`কানেকশন বিচ্ছিন্ন হয়েছে (Reason: ${reason}). আবার যুক্ত হচ্ছে...`);
+            // 401 মানে লগআউট, লগআউট হলে আর লুপ করবে না
+            if(reason !== 401) {
+                setTimeout(connectToWhatsApp, 5000);
+            }
         } else if(connection === 'open') {
             console.log('\n🎉 আলহামদুলিল্লাহ! আপনার বট এখন সম্পূর্ণ প্রস্তুত এবং রানিং!\n');
         }
