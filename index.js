@@ -1,8 +1,9 @@
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const puppeteer = require('puppeteer'); // নতুন যুক্ত করা হলো
 
-// Render-এর জন্য একটি ডামি ওয়েব সার্ভার তৈরি করা হলো
+// Render-এর জন্য ডামি সার্ভার
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -18,6 +19,7 @@ app.listen(port, () => {
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
+        executablePath: puppeteer.executablePath(), // ১০০% কাজ করার জন্য এই লাইনটি যুক্ত করা হলো
         headless: true,
         args: [
             '--no-sandbox',
