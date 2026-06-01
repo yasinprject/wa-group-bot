@@ -54,26 +54,33 @@ async function connectToWhatsApp () {
         }
     });
 
-    const sendWelcomeMessage = (groupId, participant) => {
-        // 🔴 ক্র্যাশ এড়ানোর জন্য পাওয়ারফুল সেফটি চেক
-        if (!participant || typeof participant !== 'string') return;
+    const sendWelcomeMessage = (groupId, rawParticipant) => {
+        if (!rawParticipant || typeof rawParticipant !== 'string') return;
+        
+        // 🔴 ম্যাজিক ফিক্স: হোয়াটসঅ্যাপকে সঠিক ফরম্যাট (JID) জোর করে দেওয়া হচ্ছে
+        const participant = rawParticipant.includes('@s.whatsapp.net') ? rawParticipant : `${rawParticipant}@s.whatsapp.net`;
         
         if (welcomedUsers.has(participant)) return;
         welcomedUsers.add(participant);
         setTimeout(() => welcomedUsers.delete(participant), 60000); 
 
-        // নিজের নম্বর চেক (সেফটি সহ)
         const myNumber = sock.user?.id?.split(':')[0] || '';
-        if (myNumber && participant.includes(myNumber)) return;
+        if (myNumber && participant.includes(myNumber)) return; // নিজেকে নিজে মেসেজ দিবে না
 
         const userNumber = participant.split('@')[0];
         const welcomeMessage = `স্বাগতম @${userNumber}! 🎉\n\nআমাদের গ্রুপে আপনাকে পেয়ে আমরা আনন্দিত।\n\n📜 *গ্রুপের রুলস:*\n১. স্প্যাম মেসেজ দেওয়া নিষেধ।\n২. সবাইকে সম্মান দিয়ে কথা বলুন।\n৩. অপ্রাসঙ্গিক পোস্ট থেকে বিরত থাকুন।\n\nধন্যবাদ!`;
 
         setTimeout(async () => {
-            try { await sock.sendMessage(groupId, { text: welcomeMessage, mentions: [participant] }); } catch (err) {}
-        }, 2500);
+            try { 
+                await sock.sendMessage(groupId, { text: welcomeMessage, mentions: [participant] }); 
+                console.log(`✅ ${userNumber} কে মেসেজ পাঠানো সফল হয়েছে!`);
+            } catch (err) {
+                console.log(`❌ মেসেজ পাঠাতে এরর:`, err);
+            }
+        }, 3000); // ৩ সেকেন্ড অপেক্ষা (যাতে হোয়াটসঅ্যাপ মেম্বারকে সিঙ্ক করতে পারে)
     };
 
+    // সিস্টেম ১: !set কমান্ড এবং সিস্টেম মেসেজ ক্যাচ
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if(type !== 'notify') return;
         const msg = messages[0];
@@ -91,21 +98,18 @@ async function connectToWhatsApp () {
             if (targetGroupId && groupId !== targetGroupId) return;
 
             const participants = msg.messageStubParameters || [];
-            for (let participant of participants) {
-                sendWelcomeMessage(groupId, participant);
-            }
+            for (let p of participants) sendWelcomeMessage(groupId, p);
         }
     });
 
+    // সিস্টেম ২: ডিরেক্ট ব্যাকগ্রাউন্ড ইভেন্ট ক্যাচ
     sock.ev.on('group-participants.update', async (update) => {
         if (update.action === 'add' || update.action === 'invite') {
             const groupId = update.id;
             if (targetGroupId && groupId !== targetGroupId) return;
 
             const participants = update.participants || [];
-            for (let participant of participants) {
-                sendWelcomeMessage(groupId, participant);
-            }
+            for (let p of participants) sendWelcomeMessage(groupId, p);
         }
     });
 }
