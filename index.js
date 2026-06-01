@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, Browsers, WAMessageStubType } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const pino = require('pino');
 const QRCode = require('qrcode');
@@ -24,6 +24,9 @@ let targetGroupId = '';
 if (fs.existsSync('group_id.txt')) {
     targetGroupId = fs.readFileSync('group_id.txt', 'utf8');
 }
+
+// 🔴 ডাবল মেসেজ বন্ধ করার স্মার্ট মেমোরি
+const welcomedUsers = new Set();
 
 async function connectToWhatsApp () {
     const { state, saveCreds } = await useMultiFileAuthState('session_web_qr');
@@ -52,12 +55,29 @@ async function connectToWhatsApp () {
         }
     });
 
-    // 🔴 ১০০% কার্যকরী পদ্ধতি: চ্যাটের সিস্টেম মেসেজ (StubType) রিড করা
+    // 🔴 ওয়েলকাম মেসেজ ফায়ার করার মূল ফাংশন
+    const sendWelcomeMessage = (groupId, participant) => {
+        // অলরেডি মেসেজ দিয়ে থাকলে রিটার্ন করবে
+        if (welcomedUsers.has(participant)) return;
+        welcomedUsers.add(participant);
+        setTimeout(() => welcomedUsers.delete(participant), 60000); // ১ মিনিট পর মেমোরি ক্লিয়ার
+
+        const myNumber = sock.user.id.split(':')[0];
+        if (participant.includes(myNumber)) return;
+
+        const userNumber = participant.split('@')[0];
+        const welcomeMessage = `স্বাগতম @${userNumber}! 🎉\n\nআমাদের গ্রুপে আপনাকে পেয়ে আমরা আনন্দিত।\n\n📜 *গ্রুপের রুলস:*\n১. স্প্যাম মেসেজ দেওয়া নিষেধ।\n২. সবাইকে সম্মান দিয়ে কথা বলুন।\n৩. অপ্রাসঙ্গিক পোস্ট থেকে বিরত থাকুন।\n\nধন্যবাদ!`;
+
+        setTimeout(async () => {
+            try { await sock.sendMessage(groupId, { text: welcomeMessage, mentions: [participant] }); } catch (err) {}
+        }, 2500); // ২.৫ সেকেন্ড অপেক্ষা
+    };
+
+    // 🔴 সিস্টেম ১: চ্যাটের মেসেজ (লিংক বা ম্যানুয়াল অ্যাড সব সিগন্যাল)
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if(type !== 'notify') return;
         const msg = messages[0];
-        
-        // ১. !set কমান্ডের কাজ
+
         const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
         if(text === '!set') {
             targetGroupId = msg.key.remoteJid;
@@ -66,34 +86,23 @@ async function connectToWhatsApp () {
             return;
         }
 
-        // ২. গ্রুপে কেউ জয়েন করলে বা অ্যাড করলে (System Message Catch করা)
-        // 27 মানে হলো GROUP_PARTICIPANT_ADD (কেউ কাউকে অ্যাড করেছে বা লিঙ্কে জয়েন করেছে)
-        if (msg.messageStubType === 27 || msg.messageStubType === WAMessageStubType.GROUP_PARTICIPANT_ADD) {
+        // 27 = ম্যানুয়াল অ্যাড, 32 = ইনভাইট লিংক দিয়ে জয়েন
+        if (msg.messageStubType === 27 || msg.messageStubType === 32) {
             const groupId = msg.key.remoteJid;
-            
-            // লক করা গ্রুপ ছাড়া অন্য গ্রুপ হলে মেসেজ দিবে না
             if (targetGroupId && groupId !== targetGroupId) return;
 
-            // যারা জয়েন করেছে তাদের নম্বরের লিস্ট
             const participants = msg.messageStubParameters || [];
-            
-            for (let participant of participants) {
-                // বট নিজেকে নিজে যেন ওয়েলকাম না দেয়
-                const myNumber = sock.user.id.split(':')[0];
-                if (participant.includes(myNumber)) continue;
+            for (let participant of participants) sendWelcomeMessage(groupId, participant);
+        }
+    });
 
-                const userNumber = participant.split('@')[0];
-                const welcomeMessage = `স্বাগতম @${userNumber}! 🎉\n\nআমাদের গ্রুপে আপনাকে পেয়ে আমরা আনন্দিত।\n\n📜 *গ্রুপের রুলস:*\n১. স্প্যাম মেসেজ দেওয়া নিষেধ।\n২. সবাইকে সম্মান দিয়ে কথা বলুন।\n৩. অপ্রাসঙ্গিক পোস্ট থেকে বিরত থাকুন।\n\nধন্যবাদ!`;
-                
-                // ২ সেকেন্ড অপেক্ষা করে মেসেজ পাঠানো
-                setTimeout(async () => {
-                    try {
-                        await sock.sendMessage(groupId, { text: welcomeMessage, mentions: [participant] });
-                    } catch (err) {
-                        console.error('মেসেজ পাঠাতে সমস্যা:', err);
-                    }
-                }, 2000);
-            }
+    // 🔴 সিস্টেম ২: ব্যাকগ্রাউন্ড ইভেন্ট (অতিরিক্ত গ্যারান্টি)
+    sock.ev.on('group-participants.update', async (update) => {
+        if (update.action === 'add' || update.action === 'invite') {
+            const groupId = update.id;
+            if (targetGroupId && groupId !== targetGroupId) return;
+
+            for (let participant of update.participants) sendWelcomeMessage(groupId, participant);
         }
     });
 }
