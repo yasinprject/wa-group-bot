@@ -2,7 +2,7 @@ const { default: makeWASocket, useMultiFileAuthState, Browsers } = require('@whi
 const express = require('express');
 const pino = require('pino');
 const QRCode = require('qrcode');
-const fs = require('fs'); // ফাইল সেভ করার জন্য
+const fs = require('fs');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -20,7 +20,6 @@ app.get('/', (req, res) => {
 });
 app.listen(port, () => console.log(`ওয়েব সার্ভার ${port} পোর্টে চলছে...`));
 
-// গ্রুপের আইডি সেভ রাখার জন্য
 let targetGroupId = '';
 if (fs.existsSync('group_id.txt')) {
     targetGroupId = fs.readFileSync('group_id.txt', 'utf8');
@@ -53,7 +52,6 @@ async function connectToWhatsApp () {
         }
     });
 
-    // 🔴 ম্যাজিক কমান্ড: !set লিখলে গ্রুপ লক হয়ে যাবে
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if(type !== 'notify') return;
         const msg = messages[0];
@@ -61,31 +59,33 @@ async function connectToWhatsApp () {
         
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
         
-        // !set কমান্ড দিলে গ্রুপের আইডি সেভ হবে
         if(text === '!set') {
             targetGroupId = msg.key.remoteJid;
-            fs.writeFileSync('group_id.txt', targetGroupId); // মেমোরিতে সেভ করে রাখা হলো
-            await sock.sendMessage(targetGroupId, { text: '✅ আলহামদুলিল্লাহ! এই গ্রুপটিকে ওয়েলকাম মেসেজের জন্য সফলভাবে লক (Lock) করা হয়েছে। এখন থেকে নতুন কেউ জয়েন করলেই মেসেজ যাবে!' }, { quoted: msg });
+            fs.writeFileSync('group_id.txt', targetGroupId);
+            await sock.sendMessage(targetGroupId, { text: '✅ আলহামদুলিল্লাহ! এই গ্রুপটিকে ওয়েলকাম মেসেজের জন্য সফলভাবে লক (Lock) করা হয়েছে। এখন থেকে নতুন কেউ জয়েন করলেই অটো মেসেজ যাবে!' }, { quoted: msg });
         }
     });
 
-    // 🔴 ওয়েলকাম মেসেজ দেওয়ার লজিক (নামের ঝামেলা ছাড়াই)
+    // 🔴 অটো ওয়েলকাম মেসেজের ম্যাজিক লজিক
     sock.ev.on('group-participants.update', async (update) => {
         if (update.action === 'add') {
             try {
-                // চেক করা হচ্ছে এটা আমাদের !set করা গ্রুপ কি না
                 if (targetGroupId && update.id !== targetGroupId) return;
 
-                for (let participant of update.participants) {
-                    // বট নিজে জয়েন করলে মেসেজ দিবে না
-                    if (participant === sock.user.jid) continue;
+                // 🔴 ম্যাজিক ট্রিক: ২.৫ সেকেন্ড অপেক্ষা করা (যাতে হোয়াটসঅ্যাপ মেম্বারকে সিঙ্ক করতে পারে)
+                setTimeout(async () => {
+                    for (let participant of update.participants) {
+                        // বট নিজেকে নিজে যেন ওয়েলকাম না দেয়
+                        const myNumber = sock.user.id.split(':')[0];
+                        if (participant.includes(myNumber)) continue;
 
-                    const userNumber = participant.split('@')[0];
-                    const welcomeMessage = `স্বাগতম @${userNumber}! 🎉\n\nআমাদের গ্রুপে আপনাকে পেয়ে আমরা আনন্দিত।\n\n📜 *গ্রুপের রুলস:*\n১. স্প্যাম মেসেজ দেওয়া নিষেধ।\n২. সবাইকে সম্মান দিয়ে কথা বলুন।\n৩. অপ্রাসঙ্গিক পোস্ট থেকে বিরত থাকুন।\n\nধন্যবাদ!`;
-                    
-                    // মেসেজ পাঠানো
-                    await sock.sendMessage(update.id, { text: welcomeMessage, mentions: [participant] });
-                }
+                        const userNumber = participant.split('@')[0];
+                        const welcomeMessage = `স্বাগতম @${userNumber}! 🎉\n\nআমাদের গ্রুপে আপনাকে পেয়ে আমরা আনন্দিত।\n\n📜 *গ্রুপের রুলস:*\n১. স্প্যাম মেসেজ দেওয়া নিষেধ।\n২. সবাইকে সম্মান দিয়ে কথা বলুন।\n৩. অপ্রাসঙ্গিক পোস্ট থেকে বিরত থাকুন।\n\nধন্যবাদ!`;
+                        
+                        await sock.sendMessage(update.id, { text: welcomeMessage, mentions: [participant] });
+                    }
+                }, 2500); // আড়াই সেকেন্ড ডিলি
+
             } catch (err) {
                 console.error('মেসেজ পাঠাতে সমস্যা:', err);
             }
