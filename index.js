@@ -1,4 +1,4 @@
-// 👇 আপনার যেই গ্রুপে বট কাজ করবে, ঠিক সেই গ্রুপের হুবহু নাম এখানে দিন (ইমোজি থাকলে সেটাও দিবেন)
+// 👇 আপনার গ্রুপের মূল নামটি এখানে দিন
 const targetGroupName = "হিলফুল ফুজুল"; 
 
 const { default: makeWASocket, useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
@@ -25,14 +25,14 @@ app.get('/', (req, res) => {
 app.listen(port, () => console.log(`ওয়েব সার্ভার ${port} পোর্টে চলছে...`));
 
 async function connectToWhatsApp () {
-    // আগের সেশনটাই ব্যবহার করবে, তাই নতুন করে স্ক্যান করতে হবে না
     const { state, saveCreds } = await useMultiFileAuthState('session_web_qr');
 
     const sock = makeWASocket({
         auth: state,
         logger: pino({ level: 'silent' }),
         browser: Browsers.macOS('Desktop'),
-        printQRInTerminal: false
+        printQRInTerminal: false,
+        syncFullHistory: false // দ্রুত কানেক্ট হওয়ার জন্য
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -58,23 +58,22 @@ async function connectToWhatsApp () {
         }
     });
 
-    // 🔴 নির্দিষ্ট গ্রুপের জন্য ম্যাজিক লজিক
     sock.ev.on('group-participants.update', async (update) => {
         if (update.action === 'add') {
             try {
-                // যে গ্রুপে জয়েন করেছে, তার ডেটা নেওয়া
                 const groupMeta = await sock.groupMetadata(update.id);
                 
-                // চেক করা হচ্ছে গ্রুপের নাম আপনার দেওয়া নামের সাথে মেলে কি না
-                if (groupMeta.subject === targetGroupName) {
+                // 🔴 ম্যাজিক ট্রিক: includes ব্যবহার করা হয়েছে, অর্থাৎ বানান হুবহু না মিললেও শব্দটা থাকলেই কাজ করবে!
+                if (groupMeta.subject.includes(targetGroupName)) {
                     for (let participant of update.participants) {
+                        // বট নিজেকে নিজে যেন ওয়েলকাম না দেয়
+                        if (participant === sock.user.jid) continue;
+
                         const userNumber = participant.split('@')[0];
                         const welcomeMessage = `স্বাগতম @${userNumber}! 🎉\n\nআমাদের গ্রুপে আপনাকে পেয়ে আমরা আনন্দিত।\n\n📜 *গ্রুপের রুলস:*\n১. স্প্যাম মেসেজ দেওয়া নিষেধ।\n২. সবাইকে সম্মান দিয়ে কথা বলুন।\n৩. অপ্রাসঙ্গিক পোস্ট থেকে বিরত থাকুন।\n\nধন্যবাদ!`;
                         
                         await sock.sendMessage(update.id, { text: welcomeMessage, mentions: [participant] });
                     }
-                } else {
-                    console.log(`অন্য গ্রুপে জয়েন করেছে (${groupMeta.subject}), তাই মেসেজ দেওয়া হলো না।`);
                 }
             } catch (err) {
                 console.error('মেসেজ পাঠাতে সমস্যা:', err);
