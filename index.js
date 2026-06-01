@@ -1,62 +1,75 @@
-// 👇 আপনার বটের নম্বরটি এখানে দিন (880 সহ, কোনো + বা স্পেস দেবেন না)
-const botNumber = "88011302108957"; 
-
 const { default: makeWASocket, useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const pino = require('pino');
+const QRCode = require('qrcode'); // ওয়েবসাইটে QR কোড দেখানোর লাইব্রেরি
 
 const app = express();
-app.get('/', (req, res) => res.send('আলহামদুলিল্লাহ, আপনার হোয়াটসঅ্যাপ বট সচল আছে!'));
-app.listen(process.env.PORT || 3000, () => console.log(`সার্ভার চলছে...`));
+const port = process.env.PORT || 3000;
+
+let qrCodeImage = ''; // QR কোডের ছবি এখানে সেভ হবে
+let connectionStatus = 'বট স্টার্ট হচ্ছে, একটু অপেক্ষা করুন...'; 
+
+// Render-এর ওয়েবসাইটের পেজ ডিজাইন
+app.get('/', (req, res) => {
+    if (connectionStatus === 'connected') {
+        res.send('<h1 style="text-align: center; color: green; margin-top: 50px;">🎉 আলহামদুলিল্লাহ! আপনার বট এখন সম্পূর্ণ প্রস্তুত এবং রানিং!</h1>');
+    } else if (qrCodeImage) {
+        res.send(`
+            <div style="text-align: center; margin-top: 50px; font-family: Arial;">
+                <h2>আপনার হোয়াটসঅ্যাপ দিয়ে নিচের QR কোডটি স্ক্যান করুন</h2>
+                <img src="${qrCodeImage}" alt="QR Code" style="width: 300px; height: 300px; border: 2px solid black; border-radius: 10px; padding: 10px;">
+                <p style="color: blue; font-weight: bold;">স্ট্যাটাস: ${connectionStatus}</p>
+                <p><em>(পেজটি রিফ্রেশ করুন যদি কোড না আসে)</em></p>
+            </div>
+        `);
+    } else {
+        res.send(`<h2 style="text-align:center; margin-top:50px;">${connectionStatus}</h2><p style="text-align:center;">পেজটি একটু পর পর রিফ্রেশ করুন...</p>`);
+    }
+});
+
+app.listen(port, () => console.log(`ওয়েব সার্ভার ${port} পোর্টে চলছে...`));
 
 async function connectToWhatsApp () {
-    // আগের সব ক্যাশ ফেলে দিয়ে একদম নতুন সেশন
-    const { state, saveCreds } = await useMultiFileAuthState('session_mac_desktop');
+    // নতুন সেশন ফোল্ডার
+    const { state, saveCreds } = await useMultiFileAuthState('session_web_qr');
 
     const sock = makeWASocket({
         auth: state,
         logger: pino({ level: 'silent' }),
-        // 🔴 ম্যাজিক ট্রিক ১: ম্যাক ডেস্কটপের ছদ্মবেশ (যাতে সন্দেহ না করে)
         browser: Browsers.macOS('Desktop'),
-        printQRInTerminal: false,
-        // 🔴 ম্যাজিক ট্রিক ২: সিপিইউ লোড কমানো এবং কানেকশন ধরে রাখা
-        syncFullHistory: false, 
-        markOnlineOnConnect: false,
-        keepAliveIntervalMs: 30000 
+        printQRInTerminal: false // টার্মিনালের হাবিজাবি QR বন্ধ
     });
-
-    if (!sock.authState.creds.registered) {
-        // সার্ভার পুরোপুরি চালু হওয়ার জন্য একটু সময় দেওয়া হলো
-        setTimeout(async () => {
-            try {
-                let code = await sock.requestPairingCode(botNumber);
-                code = code?.match(/.{1,4}/g)?.join("-") || code;
-                console.log('\n=============================================');
-                console.log(`✅ আপনার পেয়ারিং কোড: ${code}`);
-                console.log('=============================================\n');
-            } catch (error) {
-                console.log('কোড তৈরিতে সমস্যা:', error?.message);
-            }
-        }, 4000); 
-    }
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
         
+        // সার্ভার থেকে QR কোড আসলে সেটাকে ছবিতে কনভার্ট করে ওয়েবসাইটে পাঠানো
+        if (qr) {
+            connectionStatus = 'QR কোড রেডি! স্ক্যান করুন...';
+            try {
+                qrCodeImage = await QRCode.toDataURL(qr);
+                console.log('✅ নতুন QR কোড ওয়েবসাইটে আপডেট করা হয়েছে!');
+            } catch (err) {
+                console.error('QR জেনারেট করতে সমস্যা:', err);
+            }
+        }
+
         if(connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
-            console.log(`কানেকশন বিচ্ছিন্ন (Code: ${reason}). আবার যুক্ত হচ্ছে...`);
-            // লগআউট না হলে আবার ট্রাই করবে
-            if(reason !== 401) {
-                setTimeout(connectToWhatsApp, 5000);
-            }
+            connectionStatus = 'কানেকশন রিস্টার্ট হচ্ছে...';
+            console.log(`কানেকশন বিচ্ছিন্ন (Code: ${reason}).`);
+            if(reason === 401) qrCodeImage = ''; // লগআউট হলে কোড মুছে ফেলা
+            setTimeout(connectToWhatsApp, 5000);
         } else if(connection === 'open') {
-            console.log('\n🎉 আলহামদুলিল্লাহ! আপনার বট এখন সম্পূর্ণ প্রস্তুত এবং রানিং!\n');
+            connectionStatus = 'connected';
+            qrCodeImage = ''; // কানেক্ট হলে ছবি গায়েব
+            console.log('\n🎉 আলহামদুলিল্লাহ! আপনার বট রানিং!\n');
         }
     });
 
+    // কেউ গ্রুপে জয়েন করলে মেসেজ দেওয়ার কোড
     sock.ev.on('group-participants.update', async (update) => {
         if (update.action === 'add') {
             for (let participant of update.participants) {
