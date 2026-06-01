@@ -1,8 +1,9 @@
+// আপনার গ্রুপের নাম
+const targetGroupName = "হিলফুল ফুজুল"; 
+
 const { default: makeWASocket, useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
-const pino = require('pino');
 const QRCode = require('qrcode');
-const fs = require('fs');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -20,21 +21,13 @@ app.get('/', (req, res) => {
 });
 app.listen(port, () => console.log(`ওয়েব সার্ভার ${port} পোর্টে চলছে...`));
 
-let targetGroupId = '';
-if (fs.existsSync('group_id.txt')) {
-    targetGroupId = fs.readFileSync('group_id.txt', 'utf8');
-}
-
-const welcomedUsers = new Set();
-
 async function connectToWhatsApp () {
     const { state, saveCreds } = await useMultiFileAuthState('session_web_qr');
 
     const sock = makeWASocket({
         auth: state,
-        logger: pino({ level: 'silent' }),
-        browser: Browsers.macOS('Desktop'),
-        printQRInTerminal: false
+        printQRInTerminal: false,
+        browser: Browsers.macOS('Desktop')
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -45,8 +38,7 @@ async function connectToWhatsApp () {
             try { qrCodeImage = await QRCode.toDataURL(qr); connectionStatus = 'QR কোড রেডি! স্ক্যান করুন...'; } catch (err) {}
         }
         if(connection === 'close') {
-            const reason = lastDisconnect?.error?.output?.statusCode;
-            if(reason === 401) qrCodeImage = ''; 
+            if(lastDisconnect?.error?.output?.statusCode === 401) qrCodeImage = ''; 
             setTimeout(connectToWhatsApp, 5000);
         } else if(connection === 'open') {
             connectionStatus = 'connected'; qrCodeImage = ''; 
@@ -54,62 +46,34 @@ async function connectToWhatsApp () {
         }
     });
 
-    const sendWelcomeMessage = (groupId, rawParticipant) => {
-        if (!rawParticipant || typeof rawParticipant !== 'string') return;
-        
-        // 🔴 ম্যাজিক ফিক্স: হোয়াটসঅ্যাপকে সঠিক ফরম্যাট (JID) জোর করে দেওয়া হচ্ছে
-        const participant = rawParticipant.includes('@s.whatsapp.net') ? rawParticipant : `${rawParticipant}@s.whatsapp.net`;
-        
-        if (welcomedUsers.has(participant)) return;
-        welcomedUsers.add(participant);
-        setTimeout(() => welcomedUsers.delete(participant), 60000); 
-
-        const myNumber = sock.user?.id?.split(':')[0] || '';
-        if (myNumber && participant.includes(myNumber)) return; // নিজেকে নিজে মেসেজ দিবে না
-
-        const userNumber = participant.split('@')[0];
-        const welcomeMessage = `স্বাগতম @${userNumber}! 🎉\n\nআমাদের গ্রুপে আপনাকে পেয়ে আমরা আনন্দিত।\n\n📜 *গ্রুপের রুলস:*\n১. স্প্যাম মেসেজ দেওয়া নিষেধ।\n২. সবাইকে সম্মান দিয়ে কথা বলুন।\n৩. অপ্রাসঙ্গিক পোস্ট থেকে বিরত থাকুন।\n\nধন্যবাদ!`;
-
-        setTimeout(async () => {
-            try { 
-                await sock.sendMessage(groupId, { text: welcomeMessage, mentions: [participant] }); 
-                console.log(`✅ ${userNumber} কে মেসেজ পাঠানো সফল হয়েছে!`);
-            } catch (err) {
-                console.log(`❌ মেসেজ পাঠাতে এরর:`, err);
-            }
-        }, 3000); // ৩ সেকেন্ড অপেক্ষা (যাতে হোয়াটসঅ্যাপ মেম্বারকে সিঙ্ক করতে পারে)
-    };
-
-    // সিস্টেম ১: !set কমান্ড এবং সিস্টেম মেসেজ ক্যাচ
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if(type !== 'notify') return;
-        const msg = messages[0];
-
-        const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-        if(text === '!set') {
-            targetGroupId = msg.key.remoteJid;
-            fs.writeFileSync('group_id.txt', targetGroupId);
-            await sock.sendMessage(targetGroupId, { text: '✅ আলহামদুলিল্লাহ! এই গ্রুপটিকে ওয়েলকাম মেসেজের জন্য সফলভাবে লক (Lock) করা হয়েছে।' }, { quoted: msg });
-            return;
-        }
-
-        if (msg.messageStubType === 27 || msg.messageStubType === 32) {
-            const groupId = msg.key.remoteJid;
-            if (targetGroupId && groupId !== targetGroupId) return;
-
-            const participants = msg.messageStubParameters || [];
-            for (let p of participants) sendWelcomeMessage(groupId, p);
-        }
-    });
-
-    // সিস্টেম ২: ডিরেক্ট ব্যাকগ্রাউন্ড ইভেন্ট ক্যাচ
+    // 🔴 একদম ১০০% পিওর ও সহজ ওয়েলকাম লজিক (কোনো কমান্ড ছাড়া)
     sock.ev.on('group-participants.update', async (update) => {
+        
         if (update.action === 'add' || update.action === 'invite') {
-            const groupId = update.id;
-            if (targetGroupId && groupId !== targetGroupId) return;
+            try {
+                // হোয়াটসঅ্যাপের সার্ভারকে মেম্বার সিঙ্ক করার জন্য ৩ সেকেন্ড সময় দেওয়া হলো
+                await new Promise(resolve => setTimeout(resolve, 3000));
 
-            const participants = update.participants || [];
-            for (let p of participants) sendWelcomeMessage(groupId, p);
+                const groupMeta = await sock.groupMetadata(update.id);
+                
+                // যদি গ্রুপের নামে "হিলফুল ফুজুল" লেখা থাকে, তবেই সে মেসেজ দিবে
+                if (groupMeta.subject.includes(targetGroupName)) {
+                    for (let participant of update.participants) {
+                        
+                        // বট নিজেকে নিজে যেন মেসেজ না দেয়
+                        const myNumber = sock.user?.id?.split(':')[0] || '';
+                        if (participant.includes(myNumber)) continue;
+
+                        const userNumber = participant.split('@')[0];
+                        const welcomeMessage = `স্বাগতম @${userNumber}! 🎉\n\nআমাদের গ্রুপে আপনাকে পেয়ে আমরা আনন্দিত।\n\n📜 *গ্রুপের রুলস:*\n১. স্প্যাম মেসেজ দেওয়া নিষেধ।\n২. সবাইকে সম্মান দিয়ে কথা বলুন।\n৩. অপ্রাসঙ্গিক পোস্ট থেকে বিরত থাকুন।\n\nধন্যবাদ!`;
+                        
+                        // সরাসরি মেসেজ পাঠানো
+                        await sock.sendMessage(update.id, { text: welcomeMessage, mentions: [participant] });
+                    }
+                }
+            } catch (err) {
+                console.error('মেসেজ পাঠাতে সমস্যা:', err);
+            }
         }
     });
 }
