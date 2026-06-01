@@ -1,4 +1,3 @@
-// 👇 আপনার গ্রুপের মূল নামটি এখানে দিন
 const targetGroupName = "হিলফুল ফুজুল"; 
 
 const { default: makeWASocket, useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
@@ -8,7 +7,6 @@ const QRCode = require('qrcode');
 
 const app = express();
 const port = process.env.PORT || 3000;
-
 let qrCodeImage = ''; 
 let connectionStatus = 'বট রানিং আছে...'; 
 
@@ -21,7 +19,6 @@ app.get('/', (req, res) => {
         res.send(`<h2 style="text-align:center; margin-top:50px;">${connectionStatus}</h2>`);
     }
 });
-
 app.listen(port, () => console.log(`ওয়েব সার্ভার ${port} পোর্টে চলছে...`));
 
 async function connectToWhatsApp () {
@@ -31,22 +28,19 @@ async function connectToWhatsApp () {
         auth: state,
         logger: pino({ level: 'silent' }),
         browser: Browsers.macOS('Desktop'),
-        printQRInTerminal: false,
-        syncFullHistory: false // দ্রুত কানেক্ট হওয়ার জন্য
+        printQRInTerminal: false
     });
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
-        
         if (qr) {
             try {
                 qrCodeImage = await QRCode.toDataURL(qr);
                 connectionStatus = 'QR কোড রেডি! স্ক্যান করুন...';
             } catch (err) {}
         }
-
         if(connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
             if(reason === 401) qrCodeImage = ''; 
@@ -58,15 +52,27 @@ async function connectToWhatsApp () {
         }
     });
 
+    // 🔴 নতুন রুলস: বটকে গ্রুপ চেনানোর জন্য একটি কমান্ড অ্যাড করা হলো
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if(type !== 'notify') return;
+        const msg = messages[0];
+        if(!msg.message) return;
+        
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+        
+        // আপনি !test লিখলে বট বুঝতে পারবে সে কোন গ্রুপে আছে
+        if(text === '!test') {
+            await sock.sendMessage(msg.key.remoteJid, { text: '✅ আলহামদুলিল্লাহ! আপনার বট এই গ্রুপে ১০০% কাজ করছে এবং গ্রুপটিকে চিনে নিয়েছে!' }, { quoted: msg });
+        }
+    });
+
     sock.ev.on('group-participants.update', async (update) => {
         if (update.action === 'add') {
             try {
                 const groupMeta = await sock.groupMetadata(update.id);
                 
-                // 🔴 ম্যাজিক ট্রিক: includes ব্যবহার করা হয়েছে, অর্থাৎ বানান হুবহু না মিললেও শব্দটা থাকলেই কাজ করবে!
                 if (groupMeta.subject.includes(targetGroupName)) {
                     for (let participant of update.participants) {
-                        // বট নিজেকে নিজে যেন ওয়েলকাম না দেয়
                         if (participant === sock.user.jid) continue;
 
                         const userNumber = participant.split('@')[0];
@@ -81,5 +87,4 @@ async function connectToWhatsApp () {
         }
     });
 }
-
 connectToWhatsApp();
