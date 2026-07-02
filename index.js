@@ -28,7 +28,6 @@ if (fs.existsSync('deletions.json')) scheduledDeletions = JSON.parse(fs.readFile
 
 let timersStarted = false; 
 
-// আরবি মাসের নামগুলো
 const hijriMonths = {
     1: "মুহাররম", 2: "সফর", 3: "রবিউল আউয়াল", 4: "রবিউস সানি",
     5: "জুমাদাল উলা", 6: "জুমাদাস সানি", 7: "রজব", 8: "শাবান",
@@ -36,7 +35,8 @@ const hijriMonths = {
 };
 
 async function connectToWhatsApp () {
-    const { state, saveCreds } = await useMultiFileAuthState('session_web_qr');
+    // 🔴 ম্যাজিক ফিক্স: ফোল্ডারের নাম পাল্টে v2 দেওয়া হলো, যাতে আগের সব জ্যাম ক্লিয়ার হয়ে যায়!
+    const { state, saveCreds } = await useMultiFileAuthState('session_web_qr_v2');
 
     const sock = makeWASocket({
         auth: state,
@@ -65,14 +65,13 @@ async function connectToWhatsApp () {
         }
     });
 
-    // মাসিক নোটিশ সিস্টেম
     const startMonthlyNoticeChecker = (sock) => {
         setInterval(async () => {
             try {
                 const now = new Date();
                 const dhakaTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Dhaka" }));
                 
-                if (dhakaTime.getHours() !== 10) return; // সকাল ১০ টায় পাঠাবে
+                if (dhakaTime.getHours() !== 10) return; 
 
                 const parts = new Intl.DateTimeFormat('en-US-u-ca-islamic', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'numeric' }).formatToParts(now);
                 const hDay = parts.find(p => p.type === 'day').value;
@@ -91,7 +90,7 @@ async function connectToWhatsApp () {
                         if (targetGroup) {
                             const botReply = await sock.sendMessage(targetGroup.id, { text: noticeText });
                             
-                            const deleteAt = Date.now() + (7 * 24 * 60 * 60 * 1000); // ৭ দিন পর
+                            const deleteAt = Date.now() + (7 * 24 * 60 * 60 * 1000); 
                             scheduledDeletions.push({ groupId: targetGroup.id, key: botReply.key, deleteAt });
                             fs.writeFileSync('deletions.json', JSON.stringify(scheduledDeletions));
 
@@ -103,7 +102,6 @@ async function connectToWhatsApp () {
         }, 5 * 60 * 1000); 
     };
 
-    // ৭ দিনের ডিলিট চেকার
     const start7DaysDeletionChecker = (sock) => {
         setInterval(async () => {
             if (scheduledDeletions.length === 0) return;
@@ -169,7 +167,6 @@ async function connectToWhatsApp () {
                 return; 
             }
 
-            // 🔴 টেস্টিং কমান্ড (শুধুমাত্র অ্যাডমিন ও আপনার জন্য)
             if (textContent === '!testnotice' && (isAdmin || isFromMe)) {
                 const now = new Date();
                 const parts = new Intl.DateTimeFormat('en-US-u-ca-islamic', { timeZone: 'Asia/Dhaka', month: 'numeric' }).formatToParts(now);
