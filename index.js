@@ -21,9 +21,19 @@ app.listen(port, () => console.log(`ওয়েব সার্ভার ${port
 
 // 🔴 মেমোরি ডেটাবেস
 let welcomedUsers = [];
-if (fs.existsSync('welcomed_users.json')) {
-    welcomedUsers = JSON.parse(fs.readFileSync('welcomed_users.json', 'utf8'));
-}
+let scheduledDeletions = []; 
+
+if (fs.existsSync('welcomed_users.json')) welcomedUsers = JSON.parse(fs.readFileSync('welcomed_users.json', 'utf8'));
+if (fs.existsSync('deletions.json')) scheduledDeletions = JSON.parse(fs.readFileSync('deletions.json', 'utf8'));
+
+let timersStarted = false; 
+
+// আরবি মাসের নামগুলো
+const hijriMonths = {
+    1: "মুহাররম", 2: "সফর", 3: "রবিউল আউয়াল", 4: "রবিউস সানি",
+    5: "জুমাদাল উলা", 6: "জুমাদাস সানি", 7: "রজব", 8: "শাবান",
+    9: "রমজান", 10: "শাওয়াল", 11: "জিলকদ", 12: "জিলহজ"
+};
 
 async function connectToWhatsApp () {
     const { state, saveCreds } = await useMultiFileAuthState('session_web_qr');
@@ -46,17 +56,78 @@ async function connectToWhatsApp () {
         } else if(connection === 'open') {
             connectionStatus = 'connected'; qrCodeImage = ''; 
             console.log('\n🎉 আলহামদুলিল্লাহ! বট রানিং!\n');
+
+            if (!timersStarted) {
+                startMonthlyNoticeChecker(sock);
+                start7DaysDeletionChecker(sock);
+                timersStarted = true;
+            }
         }
     });
 
-    // 🔴 ম্যাজিক ফাংশন: নির্দিষ্ট সময় পর মেসেজ অটো-ডিলিট করা
+    // মাসিক নোটিশ সিস্টেম
+    const startMonthlyNoticeChecker = (sock) => {
+        setInterval(async () => {
+            try {
+                const now = new Date();
+                const dhakaTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Dhaka" }));
+                
+                if (dhakaTime.getHours() !== 10) return; // সকাল ১০ টায় পাঠাবে
+
+                const parts = new Intl.DateTimeFormat('en-US-u-ca-islamic', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'numeric' }).formatToParts(now);
+                const hDay = parts.find(p => p.type === 'day').value;
+                const hMonth = parts.find(p => p.type === 'month').value;
+
+                if (hDay === '1') {
+                    let lastMonth = fs.existsSync('last_notice.txt') ? fs.readFileSync('last_notice.txt', 'utf8') : '';
+
+                    if (lastMonth !== hMonth) {
+                        const monthName = hijriMonths[hMonth] || "চলতি";
+                        const noticeText = `📢 *অ্যাডমিন নোটিশ!*\n\nআসসালামু আলাইকুম!\nসংগঠনের সকল শুভাকাঙ্ক্ষীকে জানানো যাচ্ছে যে, আজ *${monthName}* মাসের এক তারিখ। প্রত্যেককে নিজেদের ধার্যকৃত তহবিল নিম্নোক্ত নাম্বারে পাঠিয়ে দেওয়ার জন্য অনুরোধ করা হলো!\n\n📱 *বিকাশ পার্সোনাল* – 01633-786692\n\nঅর্থ সম্পাদক:\nমাওলানা শাব্বির আহমদ সাহেব`;
+
+                        const groups = Object.values(await sock.groupFetchAllParticipating());
+                        const targetGroup = groups.find(g => g.subject.includes(targetGroupName));
+
+                        if (targetGroup) {
+                            const botReply = await sock.sendMessage(targetGroup.id, { text: noticeText });
+                            
+                            const deleteAt = Date.now() + (7 * 24 * 60 * 60 * 1000); // ৭ দিন পর
+                            scheduledDeletions.push({ groupId: targetGroup.id, key: botReply.key, deleteAt });
+                            fs.writeFileSync('deletions.json', JSON.stringify(scheduledDeletions));
+
+                            fs.writeFileSync('last_notice.txt', hMonth);
+                        }
+                    }
+                }
+            } catch (err) {}
+        }, 5 * 60 * 1000); 
+    };
+
+    // ৭ দিনের ডিলিট চেকার
+    const start7DaysDeletionChecker = (sock) => {
+        setInterval(async () => {
+            if (scheduledDeletions.length === 0) return;
+            const now = Date.now();
+            let updated = false;
+
+            for (let i = 0; i < scheduledDeletions.length; i++) {
+                if (now >= scheduledDeletions[i].deleteAt && !scheduledDeletions[i].done) {
+                    try { await sock.sendMessage(scheduledDeletions[i].groupId, { delete: scheduledDeletions[i].key }); } catch (e) {}
+                    scheduledDeletions[i].done = true;
+                    updated = true;
+                }
+            }
+
+            if (updated) {
+                scheduledDeletions = scheduledDeletions.filter(d => !d.done);
+                fs.writeFileSync('deletions.json', JSON.stringify(scheduledDeletions));
+            }
+        }, 60 * 60 * 1000); 
+    };
+
     const deleteMessageAfter = (groupId, key, delayMs) => {
         setTimeout(async () => {
-            try {
-                await sock.sendMessage(groupId, { delete: key });
-            } catch (err) {
-                console.log('মেসেজ ডিলিট করতে সমস্যা (হয়তো আগেই ডিলিট করা হয়েছে):', err.message);
-            }
+            try { await sock.sendMessage(groupId, { delete: key }); } catch (err) {}
         }, delayMs);
     };
 
@@ -73,8 +144,6 @@ async function connectToWhatsApp () {
 
         try {
             const groupMeta = await sock.groupMetadata(groupId);
-            
-            // গ্রুপের নাম চেক
             if (!groupMeta.subject.includes(targetGroupName)) return;
 
             const sender = msg.key.participant || msg.key.remoteJid;
@@ -83,45 +152,44 @@ async function connectToWhatsApp () {
             
             const isAdmin = groupMeta.participants.some(p => p.id === sender && (p.admin === 'admin' || p.admin === 'superadmin'));
 
-            // মেসেজের টেক্সট (ছোট হাতের অক্ষরে কনভার্ট করা হলো যাতে টাইপ করতে সুবিধা হয়)
             const textContent = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim().toLowerCase();
             const msgType = Object.keys(msg.message).find(key => key !== 'senderKeyDistributionMessage' && key !== 'messageContextInfo');
             
             const isMedia = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'].includes(msgType);
             const hasLink = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/gi.test(textContent);
 
-            // ৩ মিনিট = ১৮০,০০০ মিলি-সেকেন্ড
             const deleteDelay = 3 * 60 * 1000; 
 
-            // ==========================================
-            // ১. অ্যান্টি-লিংক ও অ্যান্টি-মিডিয়া
-            // ==========================================
             if ((isMedia || hasLink) && !isAdmin && !isFromMe) {
-                await sock.sendMessage(groupId, { delete: msg.key }); // সাথে সাথে ডিলিট
+                await sock.sendMessage(groupId, { delete: msg.key }); 
                 const warningMsg = `⚠️ *দুঃখিত @${senderNumber}!*\nএখানে কোনো লিংক বা মিডিয়া শেয়ার করা সাধারণ মেম্বারদের জন্য অনুমোদিত নয়।\n\nবিশেষ প্রয়োজনে গ্রুপের *অ্যাডমিনদের* নক করুন!\nধন্যবাদ 🥀`;
                 const botReply = await sock.sendMessage(groupId, { text: warningMsg, mentions: [sender] });
                 
-                // ওয়ার্নিং মেসেজটিও ৩ মিনিট পর ডিলিট হয়ে যাবে
                 if (botReply) deleteMessageAfter(groupId, botReply.key, deleteDelay);
                 return; 
             }
 
-            // ==========================================
-            // ২. আপডেট করা কমান্ড লজিক (৩ মিনিট টাইমার সহ)
-            // ==========================================
-            
-            // !info কমান্ড
+            // 🔴 টেস্টিং কমান্ড (শুধুমাত্র অ্যাডমিন ও আপনার জন্য)
+            if (textContent === '!testnotice' && (isAdmin || isFromMe)) {
+                const now = new Date();
+                const parts = new Intl.DateTimeFormat('en-US-u-ca-islamic', { timeZone: 'Asia/Dhaka', month: 'numeric' }).formatToParts(now);
+                const hMonth = parts.find(p => p.type === 'month').value;
+                const monthName = hijriMonths[hMonth] || "চলতি";
+                
+                const noticeText = `📢 *অ্যাডমিন নোটিশ!*\n\nআসসালামু আলাইকুম!\nসংগঠনের সকল শুভাকাঙ্ক্ষীকে জানানো যাচ্ছে যে, আজ *${monthName}* মাসের এক তারিখ। প্রত্যেককে নিজেদের ধার্যকৃত তহবিল নিম্নোক্ত নাম্বারে পাঠিয়ে দেওয়ার জন্য অনুরোধ করা হলো!\n\n📱 *বিকাশ পার্সোনাল* – 01633-786692\n\nঅর্থ সম্পাদক:\nমাওলানা শাব্বির আহমদ সাহেব\n\n_(এটি একটি টেস্ট মেসেজ, অরিজিনাল মেসেজটি ১ তারিখে অটোমেটিক ফায়ার হবে)_`;
+                await sock.sendMessage(groupId, { text: noticeText }, { quoted: msg });
+                return;
+            }
+
             if (textContent === '!info' || textContent === 'info') {
                 const infoText = `সংগঠন সম্পর্কে জানতে ভিজিট করুন!\n🔗 https://hilful-fuzool-dorikandi.pages.dev`;
                 const botReply = await sock.sendMessage(groupId, { text: infoText }, { quoted: msg });
                 
-                // মেম্বারের কমান্ড এবং বটের রিপ্লাই দুটোই ৩ মিনিট পর ডিলিট
                 deleteMessageAfter(groupId, msg.key, deleteDelay);
                 if (botReply) deleteMessageAfter(groupId, botReply.key, deleteDelay);
                 return;
             }
 
-            // !rules কমান্ড
             if (textContent === '!rules' || textContent === 'rules' || textContent === 'rules.g') {
                 const rulesText = `📜 *গ্রুপের রুলস:*\n১. স্প্যাম মেসেজ দেওয়া নিষেধ।\n২. সবাইকে সম্মান দিয়ে কথা বলুন।\n৩. অপ্রাসঙ্গিক পোস্ট থেকে বিরত থাকুন。\n\nধন্যবাদ 🥀`;
                 const botReply = await sock.sendMessage(groupId, { text: rulesText }, { quoted: msg });
@@ -131,7 +199,6 @@ async function connectToWhatsApp () {
                 return;
             }
 
-            // !tagall কমান্ড
             if (textContent === '!tagall' && (isAdmin || isFromMe)) {
                 const allMembers = groupMeta.participants.map(p => p.id);
                 const botReply = await sock.sendMessage(groupId, { text: `📢 *অ্যাডমিন নোটিশ! সবার দৃষ্টি আকর্ষণ করছি:*`, mentions: allMembers });
@@ -141,25 +208,18 @@ async function connectToWhatsApp () {
                 return;
             }
 
-            // ==========================================
-            // ৩. ওয়েলকাম মেসেজ (৩ মিনিট টাইমার সহ)
-            // ==========================================
             if (!isFromMe && !welcomedUsers.includes(sender)) {
-                
                 const welcomeText = `*"হিলফুল ফুজুল"* সংগঠনে আপনাকে স্বাগতম @${senderNumber}! 🥀\n\nএটি দরিকান্দি গ্রামের আলেম সমাজের তত্বাবধানে পরিচালিত একটি অরাজনৈতিক ও অলাভজনক সেবামূলক সংস্থা।\n\n🔰 *সংগঠনের স্লোগান:*\n\nحلف علٰى الحقّ والعدلِ\n_অর্থ: সত্যের শপথ, ন্যায়ের পথ。_\n\nللإنسانيةِ ولِرِضا الرَّبِّ\n_অর্থ: মানবসেবায় নিবেদিত, রবের সন্তুষ্টিতে অনুপ্রাণিত।_\n\n📌 *দৃষ্টি আকর্ষণ:*\nআমাদের সংগঠন সম্পর্কে বিস্তারিত জানতে ভিজিট করুন:\n🔗 https://hilful-fuzool-dorikandi.pages.dev\n\nগ্রুপ পলিসি সম্পর্কে জানতে টাইপ করুন:\n👉 *rules.g*`;
                 
                 const botReply = await sock.sendMessage(groupId, { text: welcomeText, mentions: [sender] });
                 
-                // শুধুমাত্র ওয়েলকাম মেসেজটি ৩ মিনিট পর ডিলিট হবে (ইউজারের সালাম/মেসেজ ডিলিট হবে না)
                 if (botReply) deleteMessageAfter(groupId, botReply.key, deleteDelay);
                 
                 welcomedUsers.push(sender);
                 fs.writeFileSync('welcomed_users.json', JSON.stringify(welcomedUsers));
             }
 
-        } catch (err) {
-            console.error('Error:', err);
-        }
+        } catch (err) {}
     });
 }
 connectToWhatsApp();
