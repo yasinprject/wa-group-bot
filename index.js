@@ -35,8 +35,8 @@ const hijriMonths = {
 };
 
 async function connectToWhatsApp () {
-    // 🔴 ম্যাজিক ফিক্স: ফোল্ডারের নাম পাল্টে v2 দেওয়া হলো, যাতে আগের সব জ্যাম ক্লিয়ার হয়ে যায়!
-    const { state, saveCreds } = await useMultiFileAuthState('session_web_qr_v2');
+    // 🔴 ম্যাজিক ফিক্স: ফোল্ডারের নাম সম্পূর্ণ নতুন (v3) দেওয়া হলো!
+    const { state, saveCreds } = await useMultiFileAuthState('session_hilful_fuzool_v3');
 
     const sock = makeWASocket({
         auth: state,
