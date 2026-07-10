@@ -10,23 +10,21 @@ const fs = require('fs');
 const app = express();
 const port = process.env.PORT || 3000;
 let qrCodeImage = ''; 
-let connectionStatus = 'বট রানিং আছে... একটু অপেক্ষা করুন'; 
-const sessionName = 'session_hilful_fuzool_final'; // 🔴 ফোল্ডারের নতুন নাম
+let connectionStatus = 'সার্ভার রানিং! হোয়াটসঅ্যাপ থেকে QR কোড আসার অপেক্ষায় আছি...'; 
+const sessionName = 'session_hilful_fuzool_final'; 
 
 app.get('/', (req, res) => {
     if (connectionStatus === 'connected') res.send('<h1 style="text-align: center; color: green; margin-top: 50px;">🎉 আলহামদুলিল্লাহ! আপনার বট এখন সম্পূর্ণ প্রস্তুত এবং রানিং!</h1>');
-    else if (qrCodeImage) res.send(`<div style="text-align: center; margin-top: 50px;"><img src="${qrCodeImage}" alt="QR"><p style="font-size: 20px; color: blue; font-weight: bold;">${connectionStatus}</p></div>`);
-    else res.send(`<h2 style="text-align:center; margin-top:50px;">${connectionStatus}</h2>`);
+    else if (qrCodeImage) res.send(`<div style="text-align: center; margin-top: 50px;"><img src="${qrCodeImage}" alt="QR"><p style="font-size: 20px; color: blue; font-weight: bold;">✅ QR কোড রেডি! স্ক্যান করুন...</p></div>`);
+    else res.send(`<h2 style="text-align:center; margin-top:50px; color: orange;">${connectionStatus}</h2>`);
 });
 
-// 🔴 ম্যাজিক রিসেট লিংক: বট আটকে গেলে লিঙ্কের শেষে /reset লিখে এন্টার দিলেই সব ঠিক হয়ে যাবে!
+// ম্যাজিক রিসেট লিংক
 app.get('/reset', (req, res) => {
     try {
         fs.rmSync(sessionName, { recursive: true, force: true });
-        res.send('<h2 style="color:red; text-align:center;">✅ বটের মেমোরি ক্লিয়ার করা হয়েছে! এবার Render থেকে Manual Deploy > Clear build cache & deploy করুন।</h2>');
-    } catch(e) {
-        res.send('<h2 style="text-align:center;">ক্লিয়ার করার মতো কোনো মেমোরি নেই।</h2>');
-    }
+        res.send('<h2 style="color:red; text-align:center;">✅ বটের মেমোরি ক্লিয়ার করা হয়েছে! এবার Render থেকে Clear build cache করুন।</h2>');
+    } catch(e) { res.send('<h2 style="text-align:center;">ক্লিয়ার করার মতো কোনো মেমোরি নেই।</h2>'); }
 });
 
 app.listen(port, () => console.log(`ওয়েব সার্ভার ${port} পোর্টে চলছে...`));
@@ -64,22 +62,26 @@ async function connectToWhatsApp () {
         if (qr) { 
             try { 
                 qrCodeImage = await QRCode.toDataURL(qr); 
-                connectionStatus = '✅ QR কোড রেডি! দ্রুত স্ক্যান করুন...'; 
+                connectionStatus = 'QR Code Ready'; 
                 console.log('✅ QR কোড ওয়েবসাইটে আপডেট হয়েছে!');
-            } catch (err) { console.log(err); } 
+            } catch (err) {} 
         }
 
         if(connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
+            console.log(`কানেকশন ড্রপ (Reason: ${reason})`);
             
-            // 🔴 অটো-ক্লিনার: কানেকশন ফেইল হলে বা স্ক্যান না করলে ভাঙা মেমোরি ডিলিট করে দেবে
-            if(reason === 401 || reason === 403 || reason === 405) {
-                console.log('❌ স্ক্যান ফেইল হয়েছে! ভাঙা মেমোরি ক্লিয়ার করা হচ্ছে...');
+            // 🔴 ম্যাজিক ফিক্স: জোর করে ডিলিট করা বন্ধ! শুধু আপনি ফোন থেকে 'লগআউট' (401) করলেই সে মেমোরি মুছবে
+            if(reason === 401) {
+                console.log('❌ লগআউট হয়েছে! মেমোরি ক্লিয়ার করা হচ্ছে...');
                 qrCodeImage = ''; 
-                connectionStatus = 'স্ক্যান ফেইল হয়েছে, আবার রিস্টার্ট হচ্ছে...';
+                connectionStatus = 'লগআউট করা হয়েছে। নতুন QR কোডের অপেক্ষায় আছি...';
                 try { fs.rmSync(sessionName, { recursive: true, force: true }); } catch(e) {}
             } 
+            
+            // হোয়াটসঅ্যাপ কোড না দিলে সে চুপচাপ ৫ সেকেন্ড পর আবার ট্রাই করবে, কোনো এরর দেখাবে না
             setTimeout(connectToWhatsApp, 5000);
+            
         } else if(connection === 'open') {
             connectionStatus = 'connected'; qrCodeImage = ''; 
             console.log('\n🎉 আলহামদুলিল্লাহ! বট রানিং!\n');
